@@ -1,0 +1,173 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mongodb"
+  url      = env("MONGODB_URI")
+}
+
+model User {
+  id               String    @id @default(auto()) @map("_id") @db.ObjectId
+  email            String    @unique
+  passwordHash     String
+  name             String
+  role             String    @default("user")
+  emailVerified    Boolean   @default(false)
+  twoFactorEnabled Boolean   @default(false)
+  twoFactorSecret  String?
+  refreshTokenHash String?
+  lastLoginAt      DateTime?
+  status           String    @default("active")
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  wallets       Wallet[]
+  orders        Order[]
+  transactions  Transaction[]
+  notifications Notification[]
+  copyTrades  CopyTrade[]
+}
+
+model Wallet {
+  id        String    @id @default(auto()) @map("_id") @db.ObjectId
+  userId    String    @db.ObjectId
+  kind      String
+  balances  Balance[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@unique([userId, kind])
+}
+
+type Balance {
+  symbol String
+  amount Float
+  locked Float
+}
+
+model Asset {
+  id              String   @id @default(auto()) @map("_id") @db.ObjectId
+  symbol          String   @unique
+  name            String
+  network         String
+  decimals        Int      @default(8)
+  contractAddress String?
+  minDeposit      Float    @default(0)
+  minWithdraw     Float    @default(0)
+  withdrawFee     Float    @default(0)
+  enabled         Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model Order {
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId     String   @db.ObjectId
+  symbol     String
+  side       String
+  type       String
+  price      Float
+  amount     Float
+  filled     Float    @default(0)
+  remaining  Float
+  status     String   @default("open")
+  stopPrice  Float?
+  leverage   Int      @default(1)
+  marginMode String   @default("cross")
+  takeProfit Float?
+  stopLoss   Float?
+  reduceOnly Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+}
+
+model Transaction {
+  id                 String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId             String   @db.ObjectId
+  type               String
+  symbol             String
+  amount             Float
+  valueUSD           Float    @default(0)
+  status             String   @default("pending")
+  txHash             String?
+  fromAddress        String?
+  toAddress          String?
+  confirmations      Int      @default(0)
+  requiredConfirmations Int   @default(1)
+  fee                Float    @default(0)
+  metadata           Json?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([txHash])
+}
+
+model Notification {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId    String   @db.ObjectId
+  title     String
+  body      String
+  kind      String
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+}
+
+model BtcPayInvoice {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId      String   @db.ObjectId
+  invoiceId   String   @unique
+  amount      Float
+  currency    String   @default("USDT")
+  status      String   @default("new")
+  checkoutUrl String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([userId])
+}
+
+model Trader {
+  id            String   @id @default(auto()) @map("_id") @db.ObjectId
+  name          String
+  bio           String   @default("")
+  roi30d        Float    @default(0)
+  winRate       Float    @default(0)
+  followers     Int      @default(0)
+  maxAllocation Float    @default(10000)
+  minAllocation Float    @default(100)
+  riskScore     Int      @default(5)
+  assets        String[]
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model CopyTrade {
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId     String   @db.ObjectId
+  traderId   String   @db.ObjectId
+  traderName String
+  allocation Float
+  status     String   @default("active")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@unique([userId, traderId])
+  @@index([userId])
+}
