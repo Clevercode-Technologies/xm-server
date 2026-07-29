@@ -22,6 +22,11 @@ export const env = {
   adminUsername: process.env.ADMIN_USERNAME || "admin",
   adminPassword: process.env.ADMIN_PASSWORD || "admin-change-me",
   binanceBaseUrl: process.env.BINANCE_BASE_URL || "https://api.binance.com",
+  // Comma-separated failover lists. Defaults: Binance -> Bybit -> OKX.
+  exchangeWsUrls: (process.env.EXCHANGE_WS_URLS || "wss://stream.binance.com:9443/ws,wss://stream.bybit.com/v5/public/spot,wss://ws.okx.com:8443/ws/v5/public")
+    .split(",").map((u) => u.trim()).filter(Boolean),
+  exchangeRestUrls: (process.env.EXCHANGE_REST_URLS || "https://api.binance.com,https://api.bybit.com,https://www.okx.com")
+    .split(",").map((u) => u.trim()).filter(Boolean),
   btcpayUrl: process.env.BTCPAY_URL || "",
   btcpayApiKey: process.env.BTCPAY_API_KEY || "",
   btcpayStoreId: process.env.BTCPAY_STORE_ID || "",

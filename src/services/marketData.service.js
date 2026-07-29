@@ -1,6 +1,7 @@
-import axios from "axios";
 import { env } from "../config/env.js";
 import { fetchYahooQuotes, getYahooSymbols, isYahooSymbol } from "./externalMarket.service.js";
+import { getOrderBookSnapshot, getRecentTrades, getLatestPrice } from "./marketStream.service.js";
+import { buildAdapters } from "./exchangeAdapters.js";
 
 const cache = new Map();
 const ttlMs = 60_000;
@@ -11,6 +12,12 @@ const cryptoSymbols = ["BTC", "ETH", "USDT", "USDC", "BNB", "SOL", "TRX", "DOGE"
   "MKR", "PEPE", "WIF", "BONK", "JUP", "PYTH", "STX", "IMX", "GRT", "FTM",
   "ALGO", "RENDER", "FET", "WLD", "ENA", "JTO", "ONDO"];
 
+let restAdapters = null;
+function restAdaptersList() {
+  if (!restAdapters) restAdapters = buildAdapters(env.exchangeWsUrls, env.exchangeRestUrls);
+  return restAdapters;
+}
+
 function getCached(key) {
   const item = cache.get(key);
   if (!item || Date.now() - item.ts > ttlMs) return null;
@@ -20,6 +27,18 @@ function getCached(key) {
 function setCached(key, value) {
   cache.set(key, { ts: Date.now(), value });
   return value;
+}
+
+async function withRestFailover(symbol, fn) {
+  for (const ad of restAdaptersList()) {
+    try {
+      const result = await fn(ad);
+      if (result) return result;
+    } catch (err) {
+      console.warn(`[marketData] ${ad.id} REST failed for ${symbol}: ${err.message}`);
+    }
+  }
+  return null;
 }
 
 export async function listAssets() {
@@ -50,22 +69,28 @@ export async function ticker(symbol) {
   if (isYahooSymbol(normalized)) {
     const yahooQuote = await fetchYahooQuotes([normalized]).then((r) => r[0]).catch(() => null);
     if (yahooQuote) return setCached(key, yahooQuote);
-    throw new Error(`Failed to fetch ${normalized} from Yahoo Finance`);
+    const live = getLatestPrice(normalized);
+    if (live) return setCached(key, { symbol: normalized, pair: normalized, ...live, category: "crypto" });
+    return null;
   }
 
-  const pair = `${normalized}USDT`;
-  const { data } = await axios.get(`${env.binanceBaseUrl}/api/v3/ticker/24hr`, {
-    params: { symbol: pair },
-    timeout: 8000,
-  });
-  return setCached(key, {
-    symbol: normalized,
-    pair,
-    price: Number(data.lastPrice),
-    change24h: Number(data.priceChangePercent),
-    volume24h: Number(data.quoteVolume),
-    category: "crypto",
-  });
+  const live = getLatestPrice(normalized);
+  if (live && live.price > 0) {
+    return setCached(key, {
+      symbol: normalized,
+      pair: `${normalized}USDT`,
+      price: live.price,
+      change24h: live.change24h,
+      volume24h: live.volume24h,
+      high24h: live.high24h,
+      low24h: live.low24h,
+      category: "crypto",
+    });
+  }
+
+  const rest = await withRestFailover(normalized, (ad) => ad.restTicker(normalized));
+  if (rest) return setCached(key, rest);
+  return null;
 }
 
 export async function orderBook(symbol) {
@@ -73,12 +98,15 @@ export async function orderBook(symbol) {
   if (isYahooSymbol(normalized)) {
     return { bids: [], asks: [], lastUpdateId: 0 };
   }
-  const pair = `${normalized}USDT`;
-  const { data } = await axios.get(`${env.binanceBaseUrl}/api/v3/depth`, {
-    params: { symbol: pair, limit: 20 },
-    timeout: 8000,
-  });
-  return data;
+
+  const snapshot = getOrderBookSnapshot(normalized);
+  if (snapshot && snapshot.bids?.length && snapshot.asks?.length) {
+    return { bids: snapshot.bids, asks: snapshot.asks, lastUpdateId: snapshot.ts || 0 };
+  }
+
+  const rest = await withRestFailover(normalized, (ad) => ad.restOrderBook(normalized));
+  if (rest) return { bids: rest.bids || [], asks: rest.asks || [], lastUpdateId: rest.lastUpdateId || 0 };
+  return { bids: [], asks: [], lastUpdateId: 0 };
 }
 
 export async function trades(symbol) {
@@ -86,12 +114,12 @@ export async function trades(symbol) {
   if (isYahooSymbol(normalized)) {
     return [];
   }
-  const pair = `${normalized}USDT`;
-  const { data } = await axios.get(`${env.binanceBaseUrl}/api/v3/trades`, {
-    params: { symbol: pair, limit: 50 },
-    timeout: 8000,
-  });
-  return data;
+
+  const recent = getRecentTrades(normalized);
+  if (recent.length > 0) return recent;
+
+  const rest = await withRestFailover(normalized, (ad) => ad.restTrades(normalized));
+  return rest || [];
 }
 
 export async function klines(symbol, interval = "1h") {
@@ -99,10 +127,14 @@ export async function klines(symbol, interval = "1h") {
   if (isYahooSymbol(normalized)) {
     return [];
   }
-  const pair = `${normalized}USDT`;
-  const { data } = await axios.get(`${env.binanceBaseUrl}/api/v3/klines`, {
-    params: { symbol: pair, interval, limit: 100 },
-    timeout: 8000,
-  });
-  return data;
+
+  for (const ad of restAdaptersList()) {
+    try {
+      const data = await ad.restKlines(normalized, interval);
+      if (data && data.length > 0) return data;
+    } catch (err) {
+      console.warn(`[marketData] ${ad.id} klines failed for ${normalized}: ${err.message}`);
+    }
+  }
+  return [];
 }
