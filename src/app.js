@@ -17,9 +17,10 @@ import { toErrorResponse } from "./utils/errors.js";
 
 export function createApp() {
   const app = express();
+  const allowedOrigins = env.frontendOrigin.split(",").map((o) => o.trim().replace(/\/$/, ""));
 
   app.use(helmet());
-  app.use(cors({ origin: env.frontendOrigin, credentials: true }));
+  app.use(cors({ origin: allowedOrigins, credentials: true }));
   app.use(rateLimit({ windowMs: 15 * 60 * 1000, limit: 300 }));
 
   app.use((req, _res, next) => {

@@ -13,9 +13,10 @@ async function main() {
 
   const app = createApp();
   const server = http.createServer(app);
+  const allowedOrigins = env.frontendOrigin.split(",").map((o) => o.trim().replace(/\/$/, ""));
 
   const io = new Server(server, {
-    cors: { origin: env.frontendOrigin, credentials: true },
+    cors: { origin: allowedOrigins, credentials: true },
   });
   registerSockets(io);
   app.set("io", io);
